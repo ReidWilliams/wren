@@ -3,6 +3,7 @@ import AppKit
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var textView: NSTextView!
+    var fontSize: CGFloat = UserDefaults.standard.object(forKey: "fontSize") as? CGFloat ?? 16
 
     let bufferURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".wren")
 
@@ -14,6 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         saveBuffer()
+        UserDefaults.standard.set(fontSize, forKey: "fontSize")
     }
 
     private func loadBuffer() {
@@ -49,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
 
-        textView.font = NSFont.systemFont(ofSize: 16)
+        textView.font = makeFont()
         textView.backgroundColor = NSColor(white: 0.10, alpha: 1)
         textView.textColor = NSColor(white: 0.88, alpha: 1)
         textView.insertionPointColor = NSColor(white: 0.88, alpha: 1)
@@ -63,6 +65,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func makeFont() -> NSFont {
+        NSFont.systemFont(ofSize: fontSize)
+    }
+
+    @objc private func increaseFontSize() {
+        fontSize += 1
+        textView.font = makeFont()
+    }
+
+    @objc private func decreaseFontSize() {
+        fontSize = max(6, fontSize - 1)
+        textView.font = makeFont()
     }
 
     private func buildMenu() {
@@ -87,6 +103,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Copy",       action: #selector(NSText.copy(_:)),       keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste",      action: #selector(NSTextView.pasteAsPlainText(_:)), keyEquivalent: "v"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)),  keyEquivalent: "a"))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Increase Font Size", action: #selector(increaseFontSize), keyEquivalent: "+"))
+        editMenu.addItem(NSMenuItem(title: "Decrease Font Size", action: #selector(decreaseFontSize), keyEquivalent: "-"))
     }
 }
 
