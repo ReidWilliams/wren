@@ -1,6 +1,7 @@
 import AppKit
 
 let showStatusDot = false
+let showEntryTime = false
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuItemValidation {
     var window: NSWindow!
@@ -40,15 +41,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     private func prepareOnLaunch() {
         store = EntryStore.load(from: storeURL)
         if store.entries.isEmpty {
-            store.entries.append(Entry(date: EntryStore.todayISO(), content: EntryStore.makeInitialContent()))
+            store.entries.append(Entry(content: EntryStore.makeInitialContent(), createdAt: EntryStore.nowISO()))
         } else {
             let lastIdx = store.entries.count - 1
             if EntryStore.isEffectivelyEmpty(store.entries[lastIdx].content) {
                 // Repurpose the empty last entry for today
-                store.entries[lastIdx].date = EntryStore.todayISO()
                 store.entries[lastIdx].content = EntryStore.makeInitialContent()
+                store.entries[lastIdx].createdAt = EntryStore.nowISO()
             } else {
-                store.entries.append(Entry(date: EntryStore.todayISO(), content: EntryStore.makeInitialContent()))
+                store.entries.append(Entry(content: EntryStore.makeInitialContent(), createdAt: EntryStore.nowISO()))
             }
         }
         currentIndex = store.entries.count - 1
@@ -78,9 +79,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     }
 
     @objc func newEntry() {
-        guard isDirty else { return }
+        guard !EntryStore.isEffectivelyEmpty(textView.string) else { return }
         saveCurrentEntry()
-        store.entries.append(Entry(date: EntryStore.todayISO(), content: EntryStore.makeInitialContent()))
+        store.entries.append(Entry(content: EntryStore.makeInitialContent(), createdAt: EntryStore.nowISO()))
         currentIndex = store.entries.count - 1
         store.save(to: storeURL)
         loadCurrentEntry()
@@ -108,12 +109,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     }
 
     @objc func goBackYear() {
-        let currentYear = String(store.entries[currentIndex].date.prefix(4))
+        let currentYear = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(4))
         guard let targetYear = store.entries[0..<currentIndex]
-            .map({ String($0.date.prefix(4)) })
+            .map({ String(EntryStore.localDate(from: $0.createdAt).prefix(4)) })
             .filter({ $0 < currentYear })
             .last else { return }
-        guard let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(4)) == targetYear }) else { return }
+        guard let targetIndex = store.entries.firstIndex(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(4)) == targetYear }) else { return }
         saveCurrentEntry()
         currentIndex = targetIndex
         loadCurrentEntry()
@@ -121,12 +122,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     @objc func goForwardYear() {
         guard currentIndex < store.entries.count - 1 else { return }
-        let currentYear = String(store.entries[currentIndex].date.prefix(4))
+        let currentYear = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(4))
         if let targetYear = store.entries[(currentIndex + 1)...]
-            .map({ String($0.date.prefix(4)) })
+            .map({ String(EntryStore.localDate(from: $0.createdAt).prefix(4)) })
             .filter({ $0 > currentYear })
             .first,
-           let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(4)) == targetYear }) {
+           let targetIndex = store.entries.firstIndex(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(4)) == targetYear }) {
             saveCurrentEntry()
             currentIndex = targetIndex
         } else {
@@ -137,13 +138,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     }
 
     @objc func goBackMonth() {
-        let currentYearMonth = String(store.entries[currentIndex].date.prefix(7))
+        let currentYearMonth = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(7))
         // Find the most recent earlier month that has entries, then jump to its first entry
         guard let targetMonth = store.entries[0..<currentIndex]
-            .map({ String($0.date.prefix(7)) })
+            .map({ String(EntryStore.localDate(from: $0.createdAt).prefix(7)) })
             .filter({ $0 < currentYearMonth })
             .last else { return }
-        guard let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(7)) == targetMonth }) else { return }
+        guard let targetIndex = store.entries.firstIndex(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(7)) == targetMonth }) else { return }
         saveCurrentEntry()
         currentIndex = targetIndex
         loadCurrentEntry()
@@ -151,13 +152,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     @objc func goForwardMonth() {
         guard currentIndex < store.entries.count - 1 else { return }
-        let currentYearMonth = String(store.entries[currentIndex].date.prefix(7))
+        let currentYearMonth = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(7))
         // Find the earliest later month; if none exists, fall back to the current note
         if let targetMonth = store.entries[(currentIndex + 1)...]
-            .map({ String($0.date.prefix(7)) })
+            .map({ String(EntryStore.localDate(from: $0.createdAt).prefix(7)) })
             .filter({ $0 > currentYearMonth })
             .first,
-           let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(7)) == targetMonth }) {
+           let targetIndex = store.entries.firstIndex(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(7)) == targetMonth }) {
             saveCurrentEntry()
             currentIndex = targetIndex
         } else {
@@ -203,18 +204,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     // MARK: - Menu Validation
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(newEntry)   { return isDirty }
+        if menuItem.action == #selector(newEntry)   { return !EntryStore.isEffectivelyEmpty(textView.string) }
         if menuItem.action == #selector(goToCurrentNote) { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(goBack)         { return currentIndex > 0 }
         if menuItem.action == #selector(goForward)      { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(goBackYear)     {
-            let yr = String(store.entries[currentIndex].date.prefix(4))
-            return store.entries[0..<currentIndex].contains(where: { String($0.date.prefix(4)) < yr })
+            let yr = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(4))
+            return store.entries[0..<currentIndex].contains(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(4)) < yr })
         }
         if menuItem.action == #selector(goForwardYear)  { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(goBackMonth)    {
-            let ym = String(store.entries[currentIndex].date.prefix(7))
-            return store.entries[0..<currentIndex].contains(where: { String($0.date.prefix(7)) < ym })
+            let ym = String(EntryStore.localDate(from: store.entries[currentIndex].createdAt).prefix(7))
+            return store.entries[0..<currentIndex].contains(where: { String(EntryStore.localDate(from: $0.createdAt).prefix(7)) < ym })
         }
         if menuItem.action == #selector(goForwardMonth) { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(resetFontSize)  { return fontSize != defaultFontSize }
@@ -224,22 +225,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     // MARK: - Control Bar Updates
 
     private func updateControlBar() {
-        let currentDate = store.entries[currentIndex].date
+        let entry = store.entries[currentIndex]
+        let entryDate = EntryStore.localDate(from: entry.createdAt)
         let today = EntryStore.todayISO()
         let yesterday = EntryStore.yesterdayISO()
-        let isToday = currentDate == today
+        let isCurrentNote = currentIndex == store.entries.count - 1
+        let accent = NSColor(red: 0.78, green: 0.26, blue: 0.13, alpha: 1)
         let dimColor = NSColor(white: 0.60, alpha: 1)
-        if isToday {
-            let accent = NSColor(red: 0.78, green: 0.26, blue: 0.13, alpha: 1)
-            dateLabel.stringValue = "Today"
+
+        // Count notes sharing the same local date to decide whether to show time
+        let sameDayCount = store.entries.filter { EntryStore.localDate(from: $0.createdAt) == entryDate }.count
+        let timeStr: String? = showEntryTime && sameDayCount > 1 ? EntryStore.displayTime(from: entry.createdAt) : nil
+
+        func label(_ base: String) -> String {
+            if let t = timeStr { return "\(base), \(t)" } else { return base }
+        }
+
+        if isCurrentNote {
+            let todayCount = store.entries.filter { EntryStore.localDate(from: $0.createdAt) == today }.count
+            // "Now" never shows a time
+            dateLabel.stringValue = todayCount > 1 ? "Now" : "Today"
             dateLabel.textColor = accent
             if showStatusDot { dotView.layer?.backgroundColor = accent.cgColor }
-        } else if currentDate == yesterday {
-            dateLabel.stringValue = "Yesterday"
+        } else if entryDate == today {
+            dateLabel.stringValue = label("Today")
+            dateLabel.textColor = dimColor
+            if showStatusDot { dotView.layer?.backgroundColor = dimColor.cgColor }
+        } else if entryDate == yesterday {
+            dateLabel.stringValue = label("Yesterday")
             dateLabel.textColor = dimColor
             if showStatusDot { dotView.layer?.backgroundColor = dimColor.cgColor }
         } else {
-            dateLabel.stringValue = EntryStore.displayDate(from: currentDate)
+            dateLabel.stringValue = label(EntryStore.displayDate(from: entryDate))
             dateLabel.textColor = dimColor
             if showStatusDot { dotView.layer?.backgroundColor = dimColor.cgColor }
         }
