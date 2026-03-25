@@ -242,9 +242,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         }
 
         if isCurrentNote {
-            let todayCount = store.entries.filter { EntryStore.localDate(from: $0.createdAt) == today }.count
-            // "Now" never shows a time
-            dateLabel.stringValue = todayCount > 1 ? "Now" : "Today"
+            dateLabel.stringValue = "Today"
             dateLabel.textColor = accent
             if showStatusDot { dotView.layer?.backgroundColor = accent.cgColor }
         } else if entryDate == today {
