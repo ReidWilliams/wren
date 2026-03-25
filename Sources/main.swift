@@ -1,11 +1,15 @@
 import AppKit
 
+let showStatusDot = false
+
 class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuItemValidation {
     var window: NSWindow!
     var textView: NSTextView!
+    let defaultFontSize: CGFloat = 16
     var fontSize: CGFloat = UserDefaults.standard.object(forKey: "fontSize") as? CGFloat ?? 16
 
     // Control bar
+    var dotView: NSView!
     var dateLabel: NSTextField!
     var positionLabel: NSTextField!
 
@@ -96,6 +100,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         loadCurrentEntry()
     }
 
+    @objc func goToCurrentNote() {
+        guard currentIndex < store.entries.count - 1 else { return }
+        saveCurrentEntry()
+        currentIndex = store.entries.count - 1
+        loadCurrentEntry()
+    }
+
+    @objc func goBackYear() {
+        let currentYear = String(store.entries[currentIndex].date.prefix(4))
+        guard let targetYear = store.entries[0..<currentIndex]
+            .map({ String($0.date.prefix(4)) })
+            .filter({ $0 < currentYear })
+            .last else { return }
+        guard let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(4)) == targetYear }) else { return }
+        saveCurrentEntry()
+        currentIndex = targetIndex
+        loadCurrentEntry()
+    }
+
+    @objc func goForwardYear() {
+        guard currentIndex < store.entries.count - 1 else { return }
+        let currentYear = String(store.entries[currentIndex].date.prefix(4))
+        if let targetYear = store.entries[(currentIndex + 1)...]
+            .map({ String($0.date.prefix(4)) })
+            .filter({ $0 > currentYear })
+            .first,
+           let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(4)) == targetYear }) {
+            saveCurrentEntry()
+            currentIndex = targetIndex
+        } else {
+            saveCurrentEntry()
+            currentIndex = store.entries.count - 1
+        }
+        loadCurrentEntry()
+    }
+
     @objc func goBackMonth() {
         let currentYearMonth = String(store.entries[currentIndex].date.prefix(7))
         // Find the most recent earlier month that has entries, then jump to its first entry
@@ -110,15 +150,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
     }
 
     @objc func goForwardMonth() {
+        guard currentIndex < store.entries.count - 1 else { return }
         let currentYearMonth = String(store.entries[currentIndex].date.prefix(7))
-        // Find the earliest later month that has entries, then jump to its first entry
-        guard let targetMonth = store.entries[(currentIndex + 1)...]
+        // Find the earliest later month; if none exists, fall back to the current note
+        if let targetMonth = store.entries[(currentIndex + 1)...]
             .map({ String($0.date.prefix(7)) })
             .filter({ $0 > currentYearMonth })
-            .first else { return }
-        guard let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(7)) == targetMonth }) else { return }
-        saveCurrentEntry()
-        currentIndex = targetIndex
+            .first,
+           let targetIndex = store.entries.firstIndex(where: { String($0.date.prefix(7)) == targetMonth }) {
+            saveCurrentEntry()
+            currentIndex = targetIndex
+        } else {
+            saveCurrentEntry()
+            currentIndex = store.entries.count - 1
+        }
         loadCurrentEntry()
     }
 
@@ -134,6 +179,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     // MARK: - NSTextViewDelegate
 
+    func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+        guard let replacement = replacementString, replacement == " " else { return true }
+        let str = textView.string as NSString
+        if range.location >= 1 {
+            let prevChar = str.substring(with: NSRange(location: range.location - 1, length: 1))
+            if prevChar == "-" {
+                let lineStart = str.lineRange(for: NSRange(location: range.location - 1, length: 0)).location
+                if range.location - 1 == lineStart {
+                    textView.textStorage?.replaceCharacters(in: NSRange(location: range.location - 1, length: 1), with: "•")
+                }
+            }
+        }
+        return true
+    }
+
     func textDidChange(_ notification: Notification) {
         isDirty = true
         store.entries[currentIndex].content = textView.string
@@ -144,16 +204,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(newEntry)   { return isDirty }
+        if menuItem.action == #selector(goToCurrentNote) { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(goBack)         { return currentIndex > 0 }
         if menuItem.action == #selector(goForward)      { return currentIndex < store.entries.count - 1 }
+        if menuItem.action == #selector(goBackYear)     {
+            let yr = String(store.entries[currentIndex].date.prefix(4))
+            return store.entries[0..<currentIndex].contains(where: { String($0.date.prefix(4)) < yr })
+        }
+        if menuItem.action == #selector(goForwardYear)  { return currentIndex < store.entries.count - 1 }
         if menuItem.action == #selector(goBackMonth)    {
             let ym = String(store.entries[currentIndex].date.prefix(7))
             return store.entries[0..<currentIndex].contains(where: { String($0.date.prefix(7)) < ym })
         }
-        if menuItem.action == #selector(goForwardMonth) {
-            let ym = String(store.entries[currentIndex].date.prefix(7))
-            return store.entries[(currentIndex + 1)...].contains(where: { String($0.date.prefix(7)) > ym })
-        }
+        if menuItem.action == #selector(goForwardMonth) { return currentIndex < store.entries.count - 1 }
+        if menuItem.action == #selector(resetFontSize)  { return fontSize != defaultFontSize }
         return true
     }
 
@@ -161,11 +225,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     private func updateControlBar() {
         let currentDate = store.entries[currentIndex].date
-        dateLabel.stringValue = EntryStore.displayDate(from: currentDate)
+        let today = EntryStore.todayISO()
+        let yesterday = EntryStore.yesterdayISO()
+        let isToday = currentDate == today
+        let dimColor = NSColor(white: 0.60, alpha: 1)
+        if isToday {
+            let accent = NSColor(red: 0.78, green: 0.26, blue: 0.13, alpha: 1)
+            dateLabel.stringValue = "Today"
+            dateLabel.textColor = accent
+            if showStatusDot { dotView.layer?.backgroundColor = accent.cgColor }
+        } else if currentDate == yesterday {
+            dateLabel.stringValue = "Yesterday"
+            dateLabel.textColor = dimColor
+            if showStatusDot { dotView.layer?.backgroundColor = dimColor.cgColor }
+        } else {
+            dateLabel.stringValue = EntryStore.displayDate(from: currentDate)
+            dateLabel.textColor = dimColor
+            if showStatusDot { dotView.layer?.backgroundColor = dimColor.cgColor }
+        }
 
-        let sameDay = store.entries.filter { $0.date == currentDate }
-        let rank = store.entries[0...currentIndex].filter { $0.date == currentDate }.count
-        positionLabel.stringValue = "Note \(rank) of \(sameDay.count)"
+        positionLabel.stringValue = "Note \(currentIndex + 1) of \(store.entries.count)"
     }
 
     // MARK: - Window Building
@@ -212,6 +291,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         textView.insertionPointColor = NSColor(white: 0.88, alpha: 1)
         textView.textContainerInset = NSSize(width: 16, height: 16)
         textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.usesFontPanel = false
         textView.allowsUndo = true
         textView.delegate = self
 
@@ -237,10 +317,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         bar.addSubview(sep)
 
         let labelH: CGFloat = 18
-        let labelY: CGFloat = (height - labelH) / 2
+        let labelY: CGFloat = ((height - labelH) / 2) - 1
         let margin: CGFloat = 12
 
-        dateLabel = NSTextField(frame: NSRect(x: margin, y: labelY, width: width - margin * 2, height: labelH))
+        // Status dot
+        let dotSize: CGFloat = 5
+        let dotX: CGFloat = margin
+        let dotGap: CGFloat = 3
+        if showStatusDot {
+            let dotY: CGFloat = (height - dotSize) / 2
+            dotView = NSView(frame: NSRect(x: dotX, y: dotY, width: dotSize, height: dotSize))
+            dotView.wantsLayer = true
+            dotView.layer?.cornerRadius = dotSize / 2
+            dotView.layer?.backgroundColor = NSColor(white: 0.60, alpha: 1).cgColor
+            bar.addSubview(dotView)
+        }
+
+        let labelX: CGFloat = showStatusDot ? dotX + dotSize + dotGap : margin
+
+        dateLabel = NSTextField(frame: NSRect(x: labelX, y: labelY, width: width - labelX - margin, height: labelH))
         dateLabel.autoresizingMask = [.width]
         dateLabel.isEditable = false
         dateLabel.isBordered = false
@@ -279,6 +374,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         textView.font = makeFont()
     }
 
+    @objc private func resetFontSize() {
+        fontSize = defaultFontSize
+        textView.font = makeFont()
+    }
+
     // MARK: - Menu
 
     private func buildMenu() {
@@ -306,6 +406,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         editMenu.addItem(.separator())
         editMenu.addItem(NSMenuItem(title: "Increase Font Size", action: #selector(increaseFontSize), keyEquivalent: "+"))
         editMenu.addItem(NSMenuItem(title: "Decrease Font Size", action: #selector(decreaseFontSize), keyEquivalent: "-"))
+        editMenu.addItem(NSMenuItem(title: "Default Font Size",  action: #selector(resetFontSize),    keyEquivalent: "0"))
 
         // History menu
         let histItem = NSMenuItem()
@@ -317,6 +418,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         newNoteItem.keyEquivalentModifierMask = [.command]
         histMenu.addItem(newNoteItem)
 
+        let currentNoteItem = NSMenuItem(title: "Current Note", action: #selector(goToCurrentNote), keyEquivalent: "t")
+        currentNoteItem.keyEquivalentModifierMask = [.command]
+        histMenu.addItem(currentNoteItem)
+
         histMenu.addItem(.separator())
 
         let prevItem = NSMenuItem(title: "Previous Entry", action: #selector(goBack), keyEquivalent: "[")
@@ -326,6 +431,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
         let nextItem = NSMenuItem(title: "Next Entry", action: #selector(goForward), keyEquivalent: "]")
         nextItem.keyEquivalentModifierMask = .command
         histMenu.addItem(nextItem)
+
+        histMenu.addItem(.separator())
+
+        let prevYearItem = NSMenuItem(title: "Previous Year", action: #selector(goBackYear), keyEquivalent: "[")
+        prevYearItem.keyEquivalentModifierMask = [.control, .option, .command]
+        histMenu.addItem(prevYearItem)
+
+        let nextYearItem = NSMenuItem(title: "Next Year", action: #selector(goForwardYear), keyEquivalent: "]")
+        nextYearItem.keyEquivalentModifierMask = [.control, .option, .command]
+        histMenu.addItem(nextYearItem)
 
         histMenu.addItem(.separator())
 

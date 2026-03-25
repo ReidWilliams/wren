@@ -40,12 +40,18 @@ struct EntryStore: Codable {
         return f.string(from: Date())
     }
 
+    static func yesterdayISO() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date(timeIntervalSinceNow: -86400))
+    }
+
     static func displayDate(from iso: String) -> String {
         let inFmt = DateFormatter()
         inFmt.dateFormat = "yyyy-MM-dd"
         guard let date = inFmt.date(from: iso) else { return iso }
         let outFmt = DateFormatter()
-        outFmt.dateFormat = "MMM d, yyyy"
+        outFmt.dateFormat = "dd MMM yyyy"
         return outFmt.string(from: date)
     }
 }
