@@ -40,6 +40,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSTextViewDelegate, NSMenuIt
 
     private func prepareOnLaunch() {
         store = EntryStore.load(from: storeURL)
+        store.entries = store.entries.filter { !EntryStore.isEffectivelyEmpty($0.content) }
         if store.entries.isEmpty {
             store.entries.append(Entry(content: EntryStore.makeInitialContent(), createdAt: EntryStore.nowISO()))
         } else {
